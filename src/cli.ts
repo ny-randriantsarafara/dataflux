@@ -55,14 +55,29 @@ const parseOptionalInt = (raw: unknown): number | undefined => {
   return parsed;
 };
 
+const requiredString = (value: unknown, name: string): string => {
+  if (typeof value === 'string' && value.length > 0) {
+    return value;
+  }
+  console.error(`Error: ${name} is required`);
+  process.exit(1);
+};
+
+const optionalString = (value: unknown): string | undefined => {
+  if (typeof value === 'string' && value.length > 0) {
+    return value;
+  }
+  return undefined;
+};
+
 const buildRunnerConfig = (): RunnerConfig => {
-  const sourceType = values['source-type'] as string;
-  const targetType = values['target-type'] as string;
+  const sourceType = requiredString(values['source-type'], '--source-type');
+  const targetType = requiredString(values['target-type'], '--target-type');
 
   // Source config
   if (sourceType === 's3-dynamodb') {
-    const s3Bucket = (values['s3-bucket'] as string) ?? process.env.S3_BUCKET;
-    const s3Prefix = (values['s3-prefix'] as string) ?? process.env.S3_PREFIX;
+    const s3Bucket = optionalString(values['s3-bucket']) ?? process.env.S3_BUCKET;
+    const s3Prefix = optionalString(values['s3-prefix']) ?? process.env.S3_PREFIX;
 
     if (!s3Bucket) {
       console.error('Error: S3_BUCKET env var or --s3-bucket is required');

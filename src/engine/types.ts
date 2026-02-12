@@ -1,4 +1,5 @@
 import type { TargetDialect } from '../dialects/target';
+import type { SourceConfig } from '../dialects/source';
 
 /**
  * Metrics hook for monitoring migration progress.
@@ -97,10 +98,7 @@ export type ProfileConfig = {
 
 export type RunnerConfig = {
   /** Source dialect configuration */
-  sourceConfig: {
-    type: string;
-    [key: string]: unknown;
-  };
+  sourceConfig: SourceConfig;
   /** Target dialect configuration - passed to profile's createTarget */
   targetConfig: TargetRunnerConfig;
   profileConfig: ProfileConfig;

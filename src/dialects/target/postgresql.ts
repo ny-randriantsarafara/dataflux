@@ -1,10 +1,16 @@
 import Knex, { type Knex as KnexType } from 'knex';
 import type { TargetDialect, TargetConfig } from '../target';
 
+// Type guard for plain objects
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * PostgreSQL target dialect.
  * Writes to PostgreSQL using Knex with batch upserts.
  */
+
 class PostgreSQLTarget implements TargetDialect {
   readonly name = 'postgresql';
 
@@ -70,9 +76,12 @@ class PostgreSQLTarget implements TargetDialect {
     // Flatten all values from the batch
     const bindings: unknown[] = [];
     for (const record of batch) {
-      const recordAny = record as Record<string, unknown>;
+      // Validate record is a plain object
+      if (!isPlainObject(record)) {
+        throw new Error('Invalid record: expected plain object');
+      }
       for (const col of this.columns) {
-        const value = recordAny[col];
+        const value = record[col];
         // Handle JSON serialization for JSON columns
         if (typeof value === 'object' && value !== null) {
           bindings.push(JSON.stringify(value));

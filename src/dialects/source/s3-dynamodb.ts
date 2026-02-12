@@ -56,15 +56,13 @@ class S3DynamoDBSource implements SourceDialect {
   }
 
   async *streamRecords(fileKey: string): AsyncGenerator<Record<string, unknown>> {
-    const response = await this.client.send(
-      new GetObjectCommand({ Bucket: this.bucket, Key: fileKey })
-    );
+    const response = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: fileKey }));
 
     if (!response.Body) {
       return;
     }
 
-    const bodyStream = response.Body as Readable;
+    const bodyStream = Readable.from(response.Body as any);
     const gunzip = createGunzip();
     const decompressed = bodyStream.pipe(gunzip);
 
@@ -80,7 +78,11 @@ class S3DynamoDBSource implements SourceDialect {
       try {
         const parsed = JSON.parse(trimmed);
         const item = parsed.Item ?? parsed;
-        const unmarshalled = unmarshall(item as Record<string, AttributeValue>);
+        // Validate item is a plain object before unmarshalling
+        if (!isValidAttributeRecord(item)) {
+          continue;
+        }
+        const unmarshalled = unmarshall(item);
         yield unmarshalled;
       } catch {
         // Skip malformed lines
@@ -92,6 +94,12 @@ class S3DynamoDBSource implements SourceDialect {
     // S3 client doesn't need explicit cleanup
   }
 }
+
+// Type guard to validate an object is a plain record with string keys
+const isValidAttributeRecord = (obj: unknown): obj is Record<string, AttributeValue> => {
+  if (typeof obj !== 'object' || obj === null) return false;
+  return Object.keys(obj).every((k) => typeof k === 'string');
+};
 
 // Register the dialect
 registerSource('s3-dynamodb', (config: SourceConfig) => new S3DynamoDBSource(config));

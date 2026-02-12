@@ -13,15 +13,24 @@ export const loadCheckpoint = (logDir: string, profileName: string): Checkpoint 
   const raw = fs.readFileSync(filepath, 'utf-8');
   const parsed: unknown = JSON.parse(raw);
 
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  if (!isValidCheckpoint(parsed)) return undefined;
 
-  const record = parsed as Record<string, unknown>;
-  const processedFiles = Array.isArray(record.processedFiles) ? (record.processedFiles as string[]) : [];
-  const profileConfig = typeof record.profileConfig === 'object' ? (record.profileConfig as ProfileConfig) : undefined;
+  return { processedFiles: parsed.processedFiles, profileConfig: parsed.profileConfig };
+};
 
-  if (!profileConfig) return undefined;
+const isValidCheckpoint = (value: unknown): value is { processedFiles: string[]; profileConfig: ProfileConfig } => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  if (!keys.includes('processedFiles') || !keys.includes('profileConfig')) return false;
 
-  return { processedFiles, profileConfig };
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.processedFiles)) return false;
+  if (!record.processedFiles.every((f): f is string => typeof f === 'string')) return false;
+  if (typeof record.profileConfig !== 'object' || record.profileConfig === null || Array.isArray(record.profileConfig)) return false;
+
+  const config = record.profileConfig as Record<string, unknown>;
+  if (typeof config.batchSize !== 'number') return false;
+  return true;
 };
 
 export const saveCheckpoint = (logDir: string, profileName: string, checkpoint: Checkpoint): void => {

@@ -3,7 +3,6 @@ import { loadCheckpoint, saveCheckpoint, deleteCheckpoint } from './checkpoint';
 import { log, formatDbError } from './logger';
 import { createSource } from '../dialects/source-registry';
 import type { SourceDialect, TargetDialect } from '../dialects';
-import type { SourceConfig } from '../dialects/source';
 
 // Import dialects to register them
 import '../dialects/source/s3-dynamodb';
@@ -73,7 +72,7 @@ export const run = async <TRaw, TInsert>(
 ): Promise<RunResult> => {
   const startTime = Date.now();
 
-  const source: SourceDialect = createSource(config.sourceConfig as SourceConfig);
+  const source: SourceDialect = createSource(config.sourceConfig);
   const target: TargetDialect = profile.createTarget(config.targetConfig);
 
   try {
