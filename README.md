@@ -33,37 +33,37 @@ This tool addresses these with a profile-based architecture that can be extended
 ┌─────────────────────────────────────────────────────────────────┐
 │                          CLI (cli.ts)                           │
 │   Commands: run, start, stop, status, logs, reset               │
-│   Options: --source-type, --target-type                          │
+│   Options: --source-type, --target-type                         │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Migration Engine                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │   Runner     │──│  Checkpoint  │──│ Batch Retry  │          │
-│  │  (runner.ts)│  │(checkpoint.ts)│ │ (batch.ts)   │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│  │   Runner     │──│  Checkpoint  │──│ Batch Retry  │           │
+│  │  (runner.ts) │  │ checkpoint.ts│  │ (batch.ts)   │           │
+│  └──────────────┘  └──────────────┘  └──────────────┘           │
 │         │                                                       │
 │         ▼                                                       │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │                    Dialects (pluggable)                  │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │  │
-│  │  │SourceDialect│  │SourceDialect│  │SourceDialect│    │  │
-│  │  │ (s3-dynamo)│  │ (postgresql)│  │   (custom)  │    │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘    │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │  │
-│  │  │TargetDialect│  │TargetDialect│  │TargetDialect│    │  │
-│  │  │ (postgresql)│  │ (opensearch)│  │   (custom)  │    │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘    │  │
-│  └──────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    Dialects (pluggable)                  │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │   │
+│  │  │SourceDialect│  │SourceDialect│  │SourceDialect│       │   │
+│  │  │ (s3-dynamo) │  │ (postgresql)│  │   (custom)  │       │   │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘       │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │   │
+│  │  │TargetDialect│  │TargetDialect│  │TargetDialect│       │   │
+│  │  │ (postgresql)│  │ (opensearch)│  │   (custom)  │       │   │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘       │   │
+│  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Migration Profile                          │
-│  ┌────────────┐ ┌────────────┐ ┌───────────┐ ┌──────────────┐ │
-│  │ parseItem  │→│ groupRows  │→│ transform │→│    upsert    │ │
-│  └────────────┘ └────────────┘ └───────────┘ └──────────────┘ │
+│  ┌────────────┐ ┌────────────┐ ┌───────────┐ ┌──────────────┐   │
+│  │ parseItem  │→│ groupRows  │→│ transform │→│    upsert    │   │
+│  └────────────┘ └────────────┘ └───────────┘ └──────────────┘   │
 │                                                                 │
 │  Optional: filter, onComplete                                   │
 └─────────────────────────────────────────────────────────────────┘
@@ -128,21 +128,21 @@ tsx src/cli.ts --profile <name> <command> [options]
 | Command  | Description |
 |----------|-------------|
 | `run`    | Run in foreground. Resumes from bookmark if available. |
-| `start`  | Run as background daemon |
-| `stop`   | Stop the daemon |
-| `status` | Check daemon status |
-| `logs`   | Tail daemon logs (`-f` to follow) |
-| `reset`  | Delete bookmark, start fresh |
+| `start`  | Run as background daemon                               |
+| `stop`   | Stop the daemon                                        |
+| `status` | Check daemon status                                    |
+| `logs`   | Tail daemon logs (`-f` to follow)                      |
+| `reset`  | Delete bookmark, start fresh                           |
 
-| Option             | Description                           | Default       |
+| Option             | Description                           | Default      |
 |--------------------|---------------------------------------|--------------|
 | `-p, --profile`    | Migration profile name (required)     |              |
-| `-b, --batch-size` | DB insert batch size                 | 500          |
-| `-m, --max-id`     | Upper ID limit filter                | none         |
-| `--s3-bucket`      | S3 bucket (or env `S3_BUCKET`)      |              |
-| `--s3-prefix`      | S3 key prefix (or env `S3_PREFIX`)  |              |
-| `--source-type`    | Source dialect type                  | s3-dynamodb  |
-| `--target-type`    | Target dialect type                  | postgresql   |
+| `-b, --batch-size` | DB insert batch size                  | 500          |
+| `-m, --max-id`     | Upper ID limit filter                 | none         |
+| `--s3-bucket`      | S3 bucket (or env `S3_BUCKET`)        |              |
+| `--s3-prefix`      | S3 key prefix (or env `S3_PREFIX`)    |              |
+| `--source-type`    | Source dialect type                   | s3-dynamodb  |
+| `--target-type`    | Target dialect type                   | postgresql   |
 
 ## Usage Examples
 
