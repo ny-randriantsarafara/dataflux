@@ -1,0 +1,42 @@
+{
+  "name": "migrate-dynamodb-to-pg",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": "24"
+  },
+  "scripts": {
+    "migrate": "tsx src/cli.ts --profile pictures run",
+    "migrate:start": "tsx src/cli.ts --profile pictures start",
+    "migrate:stop": "tsx src/cli.ts --profile pictures stop",
+    "migrate:status": "tsx src/cli.ts --profile pictures status",
+    "migrate:logs": "tsx src/cli.ts --profile pictures logs -f",
+    "migrate:reset": "tsx src/cli.ts --profile pictures reset",
+    "lint": "eslint . --ext .ts",
+    "test": "jest --passWithNoTests"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@aws-sdk/util-dynamodb": "^3.600.0",
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "dotenv": "^16.3.1",
+    "knex": "^3.0.1",
+    "pg": "^8.11.3",
+    "uuid": "^9.0.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.6",
+    "@types/node": "^20.8.7",
+    "@types/uuid": "^9.0.6",
+    "@typescript-eslint/eslint-plugin": "^6.8.0",
+    "@typescript-eslint/parser": "^6.8.0",
+    "eslint": "^8.52.0",
+    "eslint-plugin-jest": "^27.4.3",
+    "jest": "^29.7.0",
+    "prettier": "^3.0.3",
+    "ts-jest": "^29.1.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.2.2"
+  }
+}
