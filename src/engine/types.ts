@@ -49,6 +49,14 @@ export type MetricsHook = {
 };
 
 /**
+ * Target config passed to profile for creating target dialect
+ */
+export type TargetRunnerConfig = {
+  type: string;
+  [key: string]: unknown;
+};
+
+/**
  * Contract that each migration profile implements.
  * The engine is fully generic — it delegates all data-specific logic to the profile.
  *
@@ -67,6 +75,9 @@ export type MigrationProfile<TRaw = unknown, TInsert = unknown> = {
 
   /** Transform a group of related rows into one insertable record */
   transform: (rows: TRaw[]) => TInsert;
+
+  /** Create a target dialect with profile-specific configuration */
+  createTarget: (config: TargetRunnerConfig) => TargetDialect;
 
   /** Upsert a batch of records into the target. Return count of rows written. */
   upsert: (target: TargetDialect, batch: TInsert[]) => Promise<number>;
@@ -90,11 +101,8 @@ export type RunnerConfig = {
     type: string;
     [key: string]: unknown;
   };
-  /** Target dialect configuration */
-  targetConfig: {
-    type: string;
-    [key: string]: unknown;
-  };
+  /** Target dialect configuration - passed to profile's createTarget */
+  targetConfig: TargetRunnerConfig;
   profileConfig: ProfileConfig;
   logDir: string;
   /** Optional metrics hook for monitoring */

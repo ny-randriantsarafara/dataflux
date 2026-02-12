@@ -1,6 +1,5 @@
 import Knex, { type Knex as KnexType } from 'knex';
 import type { TargetDialect, TargetConfig } from '../target';
-import { registerTarget } from '../target-registry';
 
 /**
  * PostgreSQL target dialect.
@@ -115,5 +114,5 @@ export const createPostgreSQLTarget = (
   return new PostgreSQLTarget(config, tableName, columns);
 };
 
-// Register with default table (can be overridden via createPostgreSQLTarget)
-registerTarget('postgresql', (config) => new PostgreSQLTarget(config, 'unknown_table', []));
+// Note: Default registration removed. Profiles must create their own target dialect
+// with proper table/column configuration. Use createPostgreSQLTarget() in profile code.

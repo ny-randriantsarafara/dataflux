@@ -1,12 +1,12 @@
-import type { MigrationProfile, RunnerConfig, Checkpoint, MetricsHook } from './types';
+import type { MigrationProfile, RunnerConfig, Checkpoint } from './types';
 import { loadCheckpoint, saveCheckpoint, deleteCheckpoint } from './checkpoint';
 import { log, formatDbError } from './logger';
 import { createSource } from '../dialects/source-registry';
-import { createTarget } from '../dialects/target-registry';
+import type { SourceDialect, TargetDialect } from '../dialects';
+import type { SourceConfig } from '../dialects/source';
 
 // Import dialects to register them
 import '../dialects/source/s3-dynamodb';
-import '../dialects/target/postgresql';
 
 export type RunResult = {
   totalScanned: number;
@@ -18,16 +18,52 @@ export type RunResult = {
   completed: boolean;
 };
 
-const emitMetrics = (
-  config: RunnerConfig,
-  name: keyof MetricsHook,
-  params: Parameters<NonNullable<MetricsHook[keyof MetricsHook]>>[0]
-): void => {
-  const hook = config.metrics?.[name];
-  if (hook) {
-    // @ts-expect-error - dynamic metric call
-    hook(params);
-  }
+const emitMetrics = {
+  onStart: (config: RunnerConfig, params: {
+    profileName: string;
+    fileCount: number;
+    batchSize: number;
+    resuming: boolean;
+  }): void => {
+    config.metrics?.onStart?.(params);
+  },
+
+  onFileComplete: (config: RunnerConfig, params: {
+    fileIndex: number;
+    fileTotal: number;
+    fileName: string;
+    scanned: number;
+    inserted: number;
+    skipped: number;
+    errors: number;
+  }): void => {
+    config.metrics?.onFileComplete?.(params);
+  },
+
+  onProgress: (config: RunnerConfig, params: {
+    scanned: number;
+    inserted: number;
+    skipped: number;
+    errors: number;
+    filesProcessed: number;
+    filesTotal: number;
+  }): void => {
+    config.metrics?.onProgress?.(params);
+  },
+
+  onComplete: (config: RunnerConfig, params: {
+    profileName: string;
+    scanned: number;
+    inserted: number;
+    skipped: number;
+    errors: number;
+    filesProcessed: number;
+    filesTotal: number;
+    completed: boolean;
+    elapsedMs: number;
+  }): void => {
+    config.metrics?.onComplete?.(params);
+  },
 };
 
 export const run = async <TRaw, TInsert>(
@@ -37,8 +73,8 @@ export const run = async <TRaw, TInsert>(
 ): Promise<RunResult> => {
   const startTime = Date.now();
 
-  const source = createSource(config.sourceConfig as never);
-  const target = createTarget(config.targetConfig as never);
+  const source: SourceDialect = createSource(config.sourceConfig as SourceConfig);
+  const target: TargetDialect = profile.createTarget(config.targetConfig);
 
   try {
     // 1. List all export files
@@ -48,15 +84,7 @@ export const run = async <TRaw, TInsert>(
 
     if (allFiles.length === 0) {
       log.warn('No files found');
-      return {
-        totalScanned: 0,
-        totalInserted: 0,
-        totalSkipped: 0,
-        totalErrors: 0,
-        filesProcessed: 0,
-        filesTotal: 0,
-        completed: true,
-      };
+      return { totalScanned: 0, totalInserted: 0, totalSkipped: 0, totalErrors: 0, filesProcessed: 0, filesTotal: 0, completed: true };
     }
 
     // 2. Load checkpoint
@@ -78,7 +106,7 @@ export const run = async <TRaw, TInsert>(
       resuming,
     });
 
-    emitMetrics(config, 'onStart', {
+    emitMetrics.onStart(config, {
       profileName: profile.name,
       fileCount: filesToProcess.length,
       batchSize,
@@ -129,12 +157,7 @@ export const run = async <TRaw, TInsert>(
           fileScanned++;
 
           if (fileScanned % batchSize === 0) {
-            log.fileCounter(
-              fileIndex,
-              allFiles.length,
-              shortName,
-              `parsed ${fileScanned.toLocaleString('en-US')} rows...`
-            );
+            log.fileCounter(fileIndex, allFiles.length, shortName, `parsed ${fileScanned.toLocaleString('en-US')} rows...`);
           }
         }
       } catch (err) {
@@ -148,12 +171,7 @@ export const run = async <TRaw, TInsert>(
       // Group and transform
       const groups = profile.groupRows(rows);
       const records = groups.map((group) => profile.transform(group));
-      log.fileCounter(
-        fileIndex,
-        allFiles.length,
-        shortName,
-        `parsed ${fileScanned.toLocaleString('en-US')} rows, grouped into ${records.length.toLocaleString('en-US')} records`
-      );
+      log.fileCounter(fileIndex, allFiles.length, shortName, `parsed ${fileScanned.toLocaleString('en-US')} rows, grouped into ${records.length.toLocaleString('en-US')} records`);
 
       // Batch upsert
       for (let i = 0; i < records.length; i += batchSize) {
@@ -178,12 +196,7 @@ export const run = async <TRaw, TInsert>(
       totalSkipped += fileSkipped;
       totalErrors += fileErrors;
 
-      log.fileCounter(
-        fileIndex,
-        allFiles.length,
-        shortName,
-        `done — scanned ${fileScanned.toLocaleString('en-US')}, inserted ${fileInserted.toLocaleString('en-US')}`
-      );
+      log.fileCounter(fileIndex, allFiles.length, shortName, `done — scanned ${fileScanned.toLocaleString('en-US')}, inserted ${fileInserted.toLocaleString('en-US')}`);
 
       const currentCheckpoint: Checkpoint = {
         processedFiles: Array.from(processedSet),
@@ -194,7 +207,7 @@ export const run = async <TRaw, TInsert>(
 
       log.runningTotal({ scanned: totalScanned, inserted: totalInserted, skipped: totalSkipped, errors: totalErrors });
 
-      emitMetrics(config, 'onFileComplete', {
+      emitMetrics.onFileComplete(config, {
         fileIndex,
         fileTotal: allFiles.length,
         fileName: shortName,
@@ -204,7 +217,7 @@ export const run = async <TRaw, TInsert>(
         errors: fileErrors,
       });
 
-      emitMetrics(config, 'onProgress', {
+      emitMetrics.onProgress(config, {
         scanned: totalScanned,
         inserted: totalInserted,
         skipped: totalSkipped,
@@ -220,6 +233,10 @@ export const run = async <TRaw, TInsert>(
     if (completed && profile.onComplete) {
       await profile.onComplete(target);
       log.success('Post-migration hook completed');
+    }
+
+    if (target.onComplete && completed) {
+      await target.onComplete();
     }
 
     if (completed) {
@@ -239,7 +256,7 @@ export const run = async <TRaw, TInsert>(
       filesTotal: allFiles.length,
     });
 
-    emitMetrics(config, 'onComplete', {
+    emitMetrics.onComplete(config, {
       profileName: profile.name,
       scanned: totalScanned,
       inserted: totalInserted,
@@ -251,15 +268,7 @@ export const run = async <TRaw, TInsert>(
       elapsedMs,
     });
 
-    return {
-      totalScanned,
-      totalInserted,
-      totalSkipped,
-      totalErrors,
-      filesProcessed,
-      filesTotal: allFiles.length,
-      completed,
-    };
+    return { totalScanned, totalInserted, totalSkipped, totalErrors, filesProcessed, filesTotal: allFiles.length, completed };
   } finally {
     if (target.close) {
       await target.close();

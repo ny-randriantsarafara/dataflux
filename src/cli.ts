@@ -55,7 +55,7 @@ const parseOptionalInt = (raw: unknown): number | undefined => {
   return parsed;
 };
 
-const buildRunnerConfig = (name: string): RunnerConfig => {
+const buildRunnerConfig = (): RunnerConfig => {
   const sourceType = values['source-type'] as string;
   const targetType = values['target-type'] as string;
 
@@ -124,7 +124,7 @@ const buildTargetConfig = (targetType: string): RunnerConfig['targetConfig'] => 
 const runCommand = async (): Promise<void> => {
   const name = requireProfile();
   const profile = getProfile(name);
-  const config = buildRunnerConfig(name);
+  const config = buildRunnerConfig();
 
   const abortController = new AbortController();
   const shouldStop = () => abortController.signal.aborted;
