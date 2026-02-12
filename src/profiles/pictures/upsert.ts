@@ -1,4 +1,4 @@
-import type { Knex } from 'knex';
+import type { TargetDialect } from '../../dialects/target';
 import { mergePictureVariants, type PictureInsert } from './transform';
 import { insertWithRetry } from '../../engine/batch';
 import { log } from '../../engine/logger';
@@ -51,7 +51,8 @@ const buildBindings = (pictures: PictureInsert[]): unknown[] =>
     JSON.stringify(p.variants),
   ]);
 
-const insertBatch = async (knex: Knex, pictures: PictureInsert[]): Promise<number> => {
+const insertBatch = async (target: TargetDialect, pictures: PictureInsert[]): Promise<number> => {
+  const knex = target.getClient();
   const columnList = COLUMNS.map((c) => `"${c}"`).join(', ');
   const values = buildValuesPlaceholder(pictures.length);
   const bindings = buildBindings(pictures);
@@ -173,7 +174,7 @@ const deduplicateById = (pictures: PictureInsert[]): PictureInsert[] => {
   return Array.from(map.values());
 };
 
-export const savePictures = async (knex: Knex, pictures: PictureInsert[]): Promise<number> => {
+export const savePictures = async (target: TargetDialect, pictures: PictureInsert[]): Promise<number> => {
   if (pictures.length === 0) {
     return 0;
   }
@@ -183,7 +184,7 @@ export const savePictures = async (knex: Knex, pictures: PictureInsert[]): Promi
 
   const inserted = await insertWithRetry(
     deduplicated,
-    (batch) => insertBatch(knex, batch),
+    (batch) => insertBatch(target, batch),
     (pic) => `picture id=${pic.id}`
   );
 

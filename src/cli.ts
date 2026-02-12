@@ -17,6 +17,8 @@ const { values, positionals } = parseArgs({
     'max-id': { type: 'string', short: 'm' },
     's3-bucket': { type: 'string' },
     's3-prefix': { type: 'string' },
+    'source-type': { type: 'string', default: 's3-dynamodb' },
+    'target-type': { type: 'string', default: 'postgresql' },
     follow: { type: 'boolean', short: 'f', default: false },
     lines: { type: 'string', short: 'n', default: '50' },
   },
@@ -54,44 +56,69 @@ const parseOptionalInt = (raw: unknown): number | undefined => {
 };
 
 const buildRunnerConfig = (name: string): RunnerConfig => {
-  const s3Bucket = (values['s3-bucket'] as string) ?? process.env.S3_BUCKET;
-  const s3Prefix = (values['s3-prefix'] as string) ?? process.env.S3_PREFIX;
+  const sourceType = values['source-type'] as string;
+  const targetType = values['target-type'] as string;
 
-  if (!s3Bucket) {
-    console.error('Error: S3_BUCKET env var or --s3-bucket is required');
-    process.exit(1);
-  }
-  if (!s3Prefix) {
-    console.error('Error: S3_PREFIX env var or --s3-prefix is required');
-    process.exit(1);
+  // Source config
+  if (sourceType === 's3-dynamodb') {
+    const s3Bucket = (values['s3-bucket'] as string) ?? process.env.S3_BUCKET;
+    const s3Prefix = (values['s3-prefix'] as string) ?? process.env.S3_PREFIX;
+
+    if (!s3Bucket) {
+      console.error('Error: S3_BUCKET env var or --s3-bucket is required');
+      process.exit(1);
+    }
+    if (!s3Prefix) {
+      console.error('Error: S3_PREFIX env var or --s3-prefix is required');
+      process.exit(1);
+    }
+
+    return {
+      sourceConfig: {
+        type: 's3-dynamodb',
+        bucket: s3Bucket,
+        prefix: s3Prefix,
+        region: process.env.AWS_REGION ?? 'eu-west-1',
+      },
+      targetConfig: buildTargetConfig(targetType),
+      profileConfig: {
+        batchSize: parseOptionalInt(values['batch-size']) ?? 500,
+        maxId: parseOptionalInt(values['max-id']),
+      },
+      logDir: BASE_DIR,
+    };
   }
 
-  const host = process.env.SERVER;
-  const user = process.env.PG_USER;
-  const password = process.env.PASSWORD;
-  if (!host || !user || !password) {
-    console.error('Error: SERVER, PG_USER, PASSWORD env vars are required');
-    process.exit(1);
-  }
+  // Add other source types here
+  console.error(`Error: Unknown source type "${sourceType}"`);
+  process.exit(1);
+};
 
-  return {
-    s3Bucket,
-    s3Prefix,
-    awsRegion: process.env.AWS_REGION ?? 'eu-west-1',
-    profileConfig: {
-      batchSize: parseOptionalInt(values['batch-size']) ?? 500,
-      maxId: parseOptionalInt(values['max-id']),
-    },
-    dbConfig: {
+const buildTargetConfig = (targetType: string): RunnerConfig['targetConfig'] => {
+  if (targetType === 'postgresql') {
+    const host = process.env.SERVER;
+    const user = process.env.PG_USER;
+    const password = process.env.PASSWORD;
+
+    if (!host || !user || !password) {
+      console.error('Error: SERVER, PG_USER, PASSWORD env vars are required');
+      process.exit(1);
+    }
+
+    return {
+      type: 'postgresql',
       host,
       port: Number(process.env.PORT ?? '5432'),
       user,
       password,
       database: process.env.DATABASE ?? 'infinityCMS',
       ssl: process.env.DB_SSL !== 'false',
-    },
-    logDir: BASE_DIR,
-  };
+    };
+  }
+
+  // Add other target types here
+  console.error(`Error: Unknown target type "${targetType}"`);
+  process.exit(1);
 };
 
 const runCommand = async (): Promise<void> => {
@@ -124,6 +151,8 @@ const buildCliArgs = (): string[] => {
   if (typeof values['max-id'] === 'string') args.push('--max-id', values['max-id']);
   if (typeof values['s3-bucket'] === 'string') args.push('--s3-bucket', values['s3-bucket']);
   if (typeof values['s3-prefix'] === 'string') args.push('--s3-prefix', values['s3-prefix']);
+  if (typeof values['source-type'] === 'string') args.push('--source-type', values['source-type']);
+  if (typeof values['target-type'] === 'string') args.push('--target-type', values['target-type']);
   return args;
 };
 
@@ -251,8 +280,10 @@ Options:
   -p, --profile <name>       Migration profile (required)
   -b, --batch-size <n>       DB insert batch size (default: 500)
   -m, --max-id <n>           Upper limit filter (profile-specific)
-  --s3-bucket <name>         S3 bucket (or env S3_BUCKET)
+  --s3-bucket <name>          S3 bucket (or env S3_BUCKET)
   --s3-prefix <prefix>       S3 key prefix (or env S3_PREFIX)
+  --source-type <type>        Source dialect type (default: s3-dynamodb)
+  --target-type <type>        Target dialect type (default: postgresql)
   -f, --follow               Follow log output (logs command)
   -n, --lines <n>            Number of log lines to show (default: 50)
 

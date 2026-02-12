@@ -1,9 +1,12 @@
-import Knex from 'knex';
-import { S3Client } from '@aws-sdk/client-s3';
-import type { MigrationProfile, RunnerConfig, Checkpoint } from './types';
-import { listExportFiles, readExportFile } from './read-s3-dump';
+import type { MigrationProfile, RunnerConfig, Checkpoint, MetricsHook } from './types';
 import { loadCheckpoint, saveCheckpoint, deleteCheckpoint } from './checkpoint';
 import { log, formatDbError } from './logger';
+import { createSource } from '../dialects/source-registry';
+import { createTarget } from '../dialects/target-registry';
+
+// Import dialects to register them
+import '../dialects/source/s3-dynamodb';
+import '../dialects/target/postgresql';
 
 export type RunResult = {
   totalScanned: number;
@@ -15,34 +18,16 @@ export type RunResult = {
   completed: boolean;
 };
 
-const getKnexClient = (config: RunnerConfig) => {
-  const sslConfig = config.dbConfig.ssl ? { rejectUnauthorized: false } : false;
-
-  return Knex({
-    client: 'pg',
-    connection: {
-      host: config.dbConfig.host,
-      port: config.dbConfig.port,
-      user: config.dbConfig.user,
-      password: config.dbConfig.password,
-      database: config.dbConfig.database,
-      application_name: `migrate-dynamodb-to-pg`,
-      ssl: sslConfig,
-    },
-    pool: { min: 2, max: 10 },
-    log: {
-      warn(message: string) {
-        log.knex.warn(message);
-      },
-      error(message: string) {
-        log.knex.error(message);
-      },
-      deprecate(message: string) {
-        log.knex.warn(message);
-      },
-      debug() {},
-    },
-  });
+const emitMetrics = (
+  config: RunnerConfig,
+  name: keyof MetricsHook,
+  params: Parameters<NonNullable<MetricsHook[keyof MetricsHook]>>[0]
+): void => {
+  const hook = config.metrics?.[name];
+  if (hook) {
+    // @ts-expect-error - dynamic metric call
+    hook(params);
+  }
 };
 
 export const run = async <TRaw, TInsert>(
@@ -52,18 +37,26 @@ export const run = async <TRaw, TInsert>(
 ): Promise<RunResult> => {
   const startTime = Date.now();
 
-  const s3Client = new S3Client({ region: config.awsRegion });
-  const knexClient = getKnexClient(config);
+  const source = createSource(config.sourceConfig as never);
+  const target = createTarget(config.targetConfig as never);
 
   try {
     // 1. List all export files
-    log.info(`Listing S3 files: s3://${config.s3Bucket}/${config.s3Prefix}`);
-    const allFiles = await listExportFiles(s3Client, config.s3Bucket, config.s3Prefix);
-    log.info(`Found ${allFiles.length} .json.gz files`);
+    log.info(`Listing source files via ${source.name}`);
+    const allFiles = await source.listFiles();
+    log.info(`Found ${allFiles.length} files`);
 
     if (allFiles.length === 0) {
-      log.warn('No .json.gz files found under the given S3 prefix');
-      return { totalScanned: 0, totalInserted: 0, totalSkipped: 0, totalErrors: 0, filesProcessed: 0, filesTotal: 0, completed: true };
+      log.warn('No files found');
+      return {
+        totalScanned: 0,
+        totalInserted: 0,
+        totalSkipped: 0,
+        totalErrors: 0,
+        filesProcessed: 0,
+        filesTotal: 0,
+        completed: true,
+      };
     }
 
     // 2. Load checkpoint
@@ -75,11 +68,21 @@ export const run = async <TRaw, TInsert>(
       log.info(`Skipping ${processedSet.size} already-processed files`);
     }
 
+    const { batchSize } = config.profileConfig;
+    const resuming = processedSet.size > 0;
+
     log.migration.start(profile.name, {
-      batchSize: config.profileConfig.batchSize,
+      batchSize,
       maxId: config.profileConfig.maxId,
       fileCount: filesToProcess.length,
-      resuming: processedSet.size > 0,
+      resuming,
+    });
+
+    emitMetrics(config, 'onStart', {
+      profileName: profile.name,
+      fileCount: filesToProcess.length,
+      batchSize,
+      resuming,
     });
 
     // 3. Process files one at a time
@@ -89,7 +92,6 @@ export const run = async <TRaw, TInsert>(
     let totalErrors = 0;
     let filesProcessed = processedSet.size;
 
-    const { batchSize } = config.profileConfig;
     let fileIndex = processedSet.size;
 
     for (const fileKey of filesToProcess) {
@@ -100,7 +102,7 @@ export const run = async <TRaw, TInsert>(
 
       fileIndex++;
       const shortName = fileKey.split('/').pop() ?? fileKey;
-      log.fileCounter(fileIndex, allFiles.length, shortName, 'downloading...');
+      log.fileCounter(fileIndex, allFiles.length, shortName, 'reading...');
 
       let fileScanned = 0;
       let fileInserted = 0;
@@ -111,7 +113,7 @@ export const run = async <TRaw, TInsert>(
       const rows: TRaw[] = [];
 
       try {
-        for await (const rawItem of readExportFile(s3Client, config.s3Bucket, fileKey)) {
+        for await (const rawItem of source.streamRecords(fileKey)) {
           const parsed = profile.parseItem(rawItem);
           if (!parsed) {
             fileSkipped++;
@@ -127,7 +129,12 @@ export const run = async <TRaw, TInsert>(
           fileScanned++;
 
           if (fileScanned % batchSize === 0) {
-            log.fileCounter(fileIndex, allFiles.length, shortName, `parsed ${fileScanned.toLocaleString('en-US')} rows...`);
+            log.fileCounter(
+              fileIndex,
+              allFiles.length,
+              shortName,
+              `parsed ${fileScanned.toLocaleString('en-US')} rows...`
+            );
           }
         }
       } catch (err) {
@@ -141,7 +148,12 @@ export const run = async <TRaw, TInsert>(
       // Group and transform
       const groups = profile.groupRows(rows);
       const records = groups.map((group) => profile.transform(group));
-      log.fileCounter(fileIndex, allFiles.length, shortName, `parsed ${fileScanned.toLocaleString('en-US')} rows, grouped into ${records.length.toLocaleString('en-US')} records`);
+      log.fileCounter(
+        fileIndex,
+        allFiles.length,
+        shortName,
+        `parsed ${fileScanned.toLocaleString('en-US')} rows, grouped into ${records.length.toLocaleString('en-US')} records`
+      );
 
       // Batch upsert
       for (let i = 0; i < records.length; i += batchSize) {
@@ -149,7 +161,7 @@ export const run = async <TRaw, TInsert>(
 
         const batch = records.slice(i, i + batchSize);
         try {
-          const count = await profile.upsert(knexClient, batch);
+          const count = await profile.upsert(target, batch);
           fileInserted += count;
         } catch (err) {
           const detail = formatDbError(err);
@@ -166,7 +178,12 @@ export const run = async <TRaw, TInsert>(
       totalSkipped += fileSkipped;
       totalErrors += fileErrors;
 
-      log.fileCounter(fileIndex, allFiles.length, shortName, `done — scanned ${fileScanned.toLocaleString('en-US')}, inserted ${fileInserted.toLocaleString('en-US')}`);
+      log.fileCounter(
+        fileIndex,
+        allFiles.length,
+        shortName,
+        `done — scanned ${fileScanned.toLocaleString('en-US')}, inserted ${fileInserted.toLocaleString('en-US')}`
+      );
 
       const currentCheckpoint: Checkpoint = {
         processedFiles: Array.from(processedSet),
@@ -176,13 +193,32 @@ export const run = async <TRaw, TInsert>(
       log.fileCounter(fileIndex, allFiles.length, shortName, 'checkpoint saved');
 
       log.runningTotal({ scanned: totalScanned, inserted: totalInserted, skipped: totalSkipped, errors: totalErrors });
+
+      emitMetrics(config, 'onFileComplete', {
+        fileIndex,
+        fileTotal: allFiles.length,
+        fileName: shortName,
+        scanned: fileScanned,
+        inserted: fileInserted,
+        skipped: fileSkipped,
+        errors: fileErrors,
+      });
+
+      emitMetrics(config, 'onProgress', {
+        scanned: totalScanned,
+        inserted: totalInserted,
+        skipped: totalSkipped,
+        errors: totalErrors,
+        filesProcessed,
+        filesTotal: allFiles.length,
+      });
     }
 
     // 4. Completion
     const completed = filesProcessed === allFiles.length && !shouldStop();
 
     if (completed && profile.onComplete) {
-      await profile.onComplete(knexClient);
+      await profile.onComplete(target);
       log.success('Post-migration hook completed');
     }
 
@@ -190,20 +226,47 @@ export const run = async <TRaw, TInsert>(
       deleteCheckpoint(config.logDir, profile.name);
     }
 
+    const elapsedMs = Date.now() - startTime;
+
     log.migration.summary({
       scanned: totalScanned,
       inserted: totalInserted,
       skipped: totalSkipped,
       errors: totalErrors,
       completed,
-      elapsed: Date.now() - startTime,
+      elapsed: elapsedMs,
       filesProcessed,
       filesTotal: allFiles.length,
     });
 
-    return { totalScanned, totalInserted, totalSkipped, totalErrors, filesProcessed, filesTotal: allFiles.length, completed };
+    emitMetrics(config, 'onComplete', {
+      profileName: profile.name,
+      scanned: totalScanned,
+      inserted: totalInserted,
+      skipped: totalSkipped,
+      errors: totalErrors,
+      filesProcessed,
+      filesTotal: allFiles.length,
+      completed,
+      elapsedMs,
+    });
+
+    return {
+      totalScanned,
+      totalInserted,
+      totalSkipped,
+      totalErrors,
+      filesProcessed,
+      filesTotal: allFiles.length,
+      completed,
+    };
   } finally {
-    await knexClient.destroy();
-    log.info('Connection pool closed');
+    if (target.close) {
+      await target.close();
+    }
+    if (source.close) {
+      await source.close();
+    }
+    log.info('Connections closed');
   }
 };
