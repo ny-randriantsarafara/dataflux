@@ -119,6 +119,114 @@ const profiles = {
 
 Then run: `tsx src/cli.ts --profile my-collection run`
 
+## Usage examples
+
+### Foreground run (interactive, local or EC2)
+
+```bash
+# Default settings
+tsx src/cli.ts --profile pictures run
+
+# With tuning: smaller batches, ID limit, custom S3 location
+tsx src/cli.ts --profile pictures run -b 100 -m 1000000 --s3-bucket my-bucket --s3-prefix exports/2026-02/
+```
+
+Ctrl+C triggers graceful shutdown: finishes current batch, saves checkpoint, exits.
+
+### Resume after interruption
+
+```bash
+# Just run again — bookmark is loaded automatically
+tsx src/cli.ts --profile pictures run
+```
+
+Skips already-processed S3 files and continues from where it left off.
+
+### Background daemon (EC2 / long-running)
+
+```bash
+tsx src/cli.ts --profile pictures start          # start daemon
+tsx src/cli.ts --profile pictures status          # check if running
+tsx src/cli.ts --profile pictures logs -f         # follow logs in real-time
+tsx src/cli.ts --profile pictures logs -n 200     # last 200 lines
+tsx src/cli.ts --profile pictures stop            # graceful stop + checkpoint
+```
+
+Each profile gets its own files: `migrate-pictures.pid`, `migrate-pictures.log`, `migrate-pictures.bookmark.json`.
+
+### Reset and re-run from scratch
+
+```bash
+tsx src/cli.ts --profile pictures reset    # delete bookmark
+tsx src/cli.ts --profile pictures run      # processes all files again (idempotent)
+```
+
+### Dry-run on a small subset
+
+```bash
+tsx src/cli.ts --profile pictures run --max-id 1000 -b 50
+```
+
+### Typical EC2 workflow (end-to-end)
+
+```bash
+# 1. Dry-run with a small subset
+tsx src/cli.ts --profile pictures run --max-id 1000 -b 50
+
+# 2. Full run as daemon
+tsx src/cli.ts --profile pictures start -b 500
+
+# 3. Monitor
+tsx src/cli.ts --profile pictures logs -f
+
+# 4. If something goes wrong — stop, fix, resume
+tsx src/cli.ts --profile pictures stop
+# ... fix issue ...
+tsx src/cli.ts --profile pictures start -b 500  # resumes automatically
+
+# 5. Verify completion (logs show COMPLETED summary)
+tsx src/cli.ts --profile pictures logs -n 20
+```
+
+### npm script shortcuts (pictures profile)
+
+```bash
+pnpm migrate              # run foreground
+pnpm migrate:start        # start daemon
+pnpm migrate:stop         # stop daemon
+pnpm migrate:status       # check status
+pnpm migrate:logs         # follow logs
+pnpm migrate:reset        # delete bookmark
+```
+
+### Running a different profile
+
+```bash
+# Once you add a "videos" profile
+tsx src/cli.ts --profile videos run
+tsx src/cli.ts --profile videos start
+tsx src/cli.ts --profile videos logs -f
+```
+
+### Environment variable override order
+
+CLI flags take precedence over env vars, which take precedence over defaults.
+
+| Setting    | CLI flag       | Env var          | Default      |
+|------------|----------------|------------------|--------------|
+| S3 bucket  | `--s3-bucket`  | `S3_BUCKET`      | (required)   |
+| S3 prefix  | `--s3-prefix`  | `S3_PREFIX`      | (required)   |
+| Batch size | `-b`           | —                | 500          |
+| Max ID     | `-m`           | —                | none         |
+| AWS region | —              | `AWS_REGION`     | eu-west-1    |
+| PG host    | —              | `SERVER`         | (required)   |
+| PG port    | —              | `PORT`           | 5432         |
+| PG user    | —              | `PG_USER`        | (required)   |
+| PG pass    | —              | `PASSWORD`       | (required)   |
+| PG db      | —              | `DATABASE`       | infinityCMS  |
+| SSL        | —              | `DB_SSL`         | true         |
+| Log dir    | —              | `MIGRATE_LOG_DIR`| cwd          |
+
 ## Running on EC2
 
 ```bash

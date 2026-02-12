@@ -1,21 +1,28 @@
 import { z } from 'zod';
 
+// Coerce strings to numbers (DynamoDB N type can unmarshall to strings)
+const numericField = z.union([z.number(), z.string().transform(Number)]);
+const optionalNumericField = z.union([z.number(), z.string().transform(Number)]).optional().nullable();
+
 const DynamoRowSchema = z.object({
   id: z.string(),
-  pictureId: z.number(),
-  languageId: z.number(),
+  pictureId: numericField,
+  languageId: numericField,
   url: z.string(),
   caption: z.string(),
-  agencyId: z.number(),
-  formatId: z.number(),
-  formatPictureId: z.number().optional(),
-  originalWidth: z.number().optional(),
-  originalHeight: z.number().optional(),
-  x: z.number().optional(),
-  y: z.number().optional(),
+  agencyId: numericField,
+  formatId: numericField,
+  formatPictureId: optionalNumericField,
+  originalWidth: optionalNumericField,
+  originalHeight: optionalNumericField,
+  x: optionalNumericField,
+  y: optionalNumericField,
 });
 
 export type DynamoRow = z.infer<typeof DynamoRowSchema>;
+
+let errorLogCount = 0;
+const MAX_ERROR_LOGS = 10;
 
 export const parseItem = (raw: Record<string, unknown>): DynamoRow | null => {
   // Ensure caption defaults to empty string
@@ -26,6 +33,15 @@ export const parseItem = (raw: Record<string, unknown>): DynamoRow | null => {
 
   const result = DynamoRowSchema.safeParse(withDefaults);
   if (!result.success) {
+    // Log first few validation errors to help debug schema mismatches
+    if (errorLogCount < MAX_ERROR_LOGS) {
+      console.error(`[parse] Validation failed for record:`, JSON.stringify(raw).slice(0, 200));
+      console.error(`[parse] Errors:`, JSON.stringify(result.error.issues, null, 2));
+      errorLogCount++;
+      if (errorLogCount === MAX_ERROR_LOGS) {
+        console.error(`[parse] Suppressing further validation errors...`);
+      }
+    }
     return null;
   }
   return result.data;

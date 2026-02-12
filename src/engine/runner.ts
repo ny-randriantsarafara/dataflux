@@ -59,6 +59,7 @@ export const run = async <TRaw, TInsert>(
     // 1. List all export files
     log.info(`Listing S3 files: s3://${config.s3Bucket}/${config.s3Prefix}`);
     const allFiles = await listExportFiles(s3Client, config.s3Bucket, config.s3Prefix);
+    log.info(`Found ${allFiles.length} .json.gz files`);
 
     if (allFiles.length === 0) {
       log.warn('No .json.gz files found under the given S3 prefix');
@@ -69,6 +70,10 @@ export const run = async <TRaw, TInsert>(
     const checkpoint = loadCheckpoint(config.logDir, profile.name);
     const processedSet = new Set(checkpoint?.processedFiles ?? []);
     const filesToProcess = allFiles.filter((f) => !processedSet.has(f));
+
+    if (processedSet.size > 0) {
+      log.info(`Skipping ${processedSet.size} already-processed files`);
+    }
 
     log.migration.start(profile.name, {
       batchSize: config.profileConfig.batchSize,
@@ -84,14 +89,18 @@ export const run = async <TRaw, TInsert>(
     let totalErrors = 0;
     let filesProcessed = processedSet.size;
 
+    const { batchSize } = config.profileConfig;
+    let fileIndex = processedSet.size;
+
     for (const fileKey of filesToProcess) {
       if (shouldStop()) {
         log.info('Graceful shutdown — saving checkpoint');
         break;
       }
 
+      fileIndex++;
       const shortName = fileKey.split('/').pop() ?? fileKey;
-      log.file(shortName, 'processing...');
+      log.fileCounter(fileIndex, allFiles.length, shortName, 'downloading...');
 
       let fileScanned = 0;
       let fileInserted = 0;
@@ -116,6 +125,10 @@ export const run = async <TRaw, TInsert>(
 
           rows.push(parsed);
           fileScanned++;
+
+          if (fileScanned % batchSize === 0) {
+            log.fileCounter(fileIndex, allFiles.length, shortName, `parsed ${fileScanned.toLocaleString('en-US')} rows...`);
+          }
         }
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
@@ -128,9 +141,9 @@ export const run = async <TRaw, TInsert>(
       // Group and transform
       const groups = profile.groupRows(rows);
       const records = groups.map((group) => profile.transform(group));
+      log.fileCounter(fileIndex, allFiles.length, shortName, `parsed ${fileScanned.toLocaleString('en-US')} rows, grouped into ${records.length.toLocaleString('en-US')} records`);
 
       // Batch upsert
-      const { batchSize } = config.profileConfig;
       for (let i = 0; i < records.length; i += batchSize) {
         if (shouldStop()) break;
 
@@ -153,18 +166,16 @@ export const run = async <TRaw, TInsert>(
       totalSkipped += fileSkipped;
       totalErrors += fileErrors;
 
-      log.fileProgress(shortName, {
-        scanned: fileScanned,
-        inserted: fileInserted,
-        skipped: fileSkipped,
-        errors: fileErrors,
-      });
+      log.fileCounter(fileIndex, allFiles.length, shortName, `done — scanned ${fileScanned.toLocaleString('en-US')}, inserted ${fileInserted.toLocaleString('en-US')}`);
 
       const currentCheckpoint: Checkpoint = {
         processedFiles: Array.from(processedSet),
         profileConfig: config.profileConfig,
       };
       saveCheckpoint(config.logDir, profile.name, currentCheckpoint);
+      log.fileCounter(fileIndex, allFiles.length, shortName, 'checkpoint saved');
+
+      log.runningTotal({ scanned: totalScanned, inserted: totalInserted, skipped: totalSkipped, errors: totalErrors });
     }
 
     // 4. Completion

@@ -6,8 +6,8 @@
     "node": "24"
   },
   "scripts": {
-    "migrate": "tsx src/cli.ts --profile pictures run",
-    "migrate:start": "tsx src/cli.ts --profile pictures start",
+    "migrate": "tsx src/cli.ts --profile pictures run --max-id 20000000",
+    "migrate:start": "tsx src/cli.ts --profile pictures --max-id 20000000 start",
     "migrate:stop": "tsx src/cli.ts --profile pictures stop",
     "migrate:status": "tsx src/cli.ts --profile pictures status",
     "migrate:logs": "tsx src/cli.ts --profile pictures logs -f",

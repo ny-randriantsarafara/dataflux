@@ -137,6 +137,29 @@ export const log = {
     },
   },
 
+  fileCounter: (index: number, total: number, filename: string, message: string) => {
+    const counter = `${COLORS.cyan}[${index}/${total}]${COLORS.reset}`;
+    const tag = `${COLORS.blue}${filename}${COLORS.reset}`;
+    console.info(`${COLORS.dim}${timestamp()}${COLORS.reset}  ${counter} ${tag}  ${message}`);
+  },
+
+  runningTotal: (stats: { scanned: number; inserted: number; skipped: number; errors: number }) => {
+    const parts = [
+      `scanned ${COLORS.bold}${formatNumber(stats.scanned)}${COLORS.reset}`,
+      `inserted ${COLORS.green}${formatNumber(stats.inserted)}${COLORS.reset}`,
+    ];
+
+    if (stats.skipped > 0) {
+      parts.push(`skipped ${COLORS.yellow}${formatNumber(stats.skipped)}${COLORS.reset}`);
+    }
+
+    if (stats.errors > 0) {
+      parts.push(`errors ${COLORS.red}${formatNumber(stats.errors)}${COLORS.reset}`);
+    }
+
+    console.info(`${COLORS.dim}${timestamp()}${COLORS.reset}  ${COLORS.dim}total${COLORS.reset}  ${parts.join('  ')}`);
+  },
+
   db: (action: string, count: number, elapsed: number) => {
     const tag = `${COLORS.dim}db${COLORS.reset}`;
     const time = (() => {
